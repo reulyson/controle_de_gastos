@@ -1,0 +1,1 @@
+"""Configurações expostas via API."""

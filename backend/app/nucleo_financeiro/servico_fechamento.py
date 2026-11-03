@@ -1,0 +1,172 @@
+"""Fechamento mensal e carry-over de saldo."""
+
+from decimal import Decimal
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.dominio.dinheiro import decimal_de
+from app.dominio.enumeracoes import StatusFechamento
+from app.modulos.modelos import DespesaMensal, FechamentoMensal, FechamentoPendencia, ReceitaMensal
+from app.nucleo_financeiro.servico_calculos import ServicoCalculos
+
+
+class ServicoFechamento:
+    """Fecha competência propagando saldo e registrando pendências."""
+
+    def __init__(self, sessao: Session) -> None:
+        self._sessao = sessao
+        self._calculos = ServicoCalculos(sessao)
+
+    def fechar_mes(self, ano: int, mes: int) -> FechamentoMensal:
+        """Fecha mês atual e prepara saldo inicial do próximo.
+
+        Pendências referenciam lançamentos não quitados sem duplicar linhas.
+
+        Args:
+            ano: Ano a fechar.
+            mes: Mês a fechar.
+
+        Returns:
+            FechamentoMensal: Registro de fechamento.
+
+        Raises:
+            ValueError: Se mês já estiver fechado.
+        """
+        conta = self._calculos.obter_conta_unica()
+        existente = self._sessao.scalar(
+            select(FechamentoMensal).where(
+                FechamentoMensal.conta_id == conta.id,
+                FechamentoMensal.ano == ano,
+                FechamentoMensal.mes == mes,
+            )
+        )
+        if existente is not None and existente.status == StatusFechamento.FECHADO:
+            msg = "Competência já fechada"
+            raise ValueError(msg)
+
+        saldo_inicial = self._calculos.saldo_inicial_competencia(ano, mes)
+        totais = self._calculos.totais_competencia(ano, mes)
+        saldo_final = decimal_de(totais.saldo_caixa)
+
+        if existente is None:
+            fechamento = FechamentoMensal(
+                conta_id=conta.id,
+                ano=ano,
+                mes=mes,
+                saldo_inicial=saldo_inicial,
+                saldo_final=saldo_final,
+                status=StatusFechamento.FECHADO,
+            )
+            self._sessao.add(fechamento)
+        else:
+            fechamento = existente
+            fechamento.saldo_inicial = saldo_inicial
+            fechamento.saldo_final = saldo_final
+            fechamento.status = StatusFechamento.FECHADO
+
+        self._sessao.flush()
+        self._registrar_pendencias(fechamento, ano, mes)
+
+        prox = self._proxima_competencia(ano, mes)
+        self._garantir_fechamento_proximo(conta.id, prox[0], prox[1], saldo_final)
+
+        self._sessao.commit()
+        self._sessao.refresh(fechamento)
+        return fechamento
+
+    def _registrar_pendencias(self, fechamento: FechamentoMensal, ano: int, mes: int) -> None:
+        """Adiciona pendências para itens não pagos/recebidos."""
+        for despesa in self._sessao.scalars(
+            select(DespesaMensal).where(
+                DespesaMensal.ano == ano,
+                DespesaMensal.mes == mes,
+                DespesaMensal.pago.is_(False),
+            )
+        ):
+            self._sessao.add(
+                FechamentoPendencia(
+                    fechamento_id=fechamento.id,
+                    referencia_tipo="despesa_mensal",
+                    referencia_id=despesa.id,
+                    descricao=f"Despesa pendente #{despesa.id}",
+                    valor=decimal_de(despesa.valor),
+                )
+            )
+        for receita in self._sessao.scalars(
+            select(ReceitaMensal).where(
+                ReceitaMensal.ano == ano,
+                ReceitaMensal.mes == mes,
+                ReceitaMensal.recebido.is_(False),
+            )
+        ):
+            self._sessao.add(
+                FechamentoPendencia(
+                    fechamento_id=fechamento.id,
+                    referencia_tipo="receita_mensal",
+                    referencia_id=receita.id,
+                    descricao=f"Receita pendente #{receita.id}",
+                    valor=decimal_de(receita.valor),
+                )
+            )
+
+    def _garantir_fechamento_proximo(
+        self,
+        conta_id: int,
+        ano: int,
+        mes: int,
+        saldo_inicial: Decimal,
+    ) -> None:
+        """Define saldo_inicial do próximo mês via registro aberto."""
+        proximo = self._sessao.scalar(
+            select(FechamentoMensal).where(
+                FechamentoMensal.conta_id == conta_id,
+                FechamentoMensal.ano == ano,
+                FechamentoMensal.mes == mes,
+            )
+        )
+        if proximo is None:
+            self._sessao.add(
+                FechamentoMensal(
+                    conta_id=conta_id,
+                    ano=ano,
+                    mes=mes,
+                    saldo_inicial=decimal_de(saldo_inicial),
+                    saldo_final=decimal_de(saldo_inicial),
+                    status=StatusFechamento.ABERTO,
+                )
+            )
+        else:
+            proximo.saldo_inicial = decimal_de(saldo_inicial)
+
+    def reabrir_mes(self, ano: int, mes: int) -> None:
+        """Reabre competência fechada.
+
+        Args:
+            ano: Ano a reabrir.
+            mes: Mês a reabrir.
+
+        Raises:
+            ValueError: Se mês não estiver fechado.
+        """
+        conta = self._calculos.obter_conta_unica()
+        fechamento = self._sessao.scalar(
+            select(FechamentoMensal).where(
+                FechamentoMensal.conta_id == conta.id,
+                FechamentoMensal.ano == ano,
+                FechamentoMensal.mes == mes,
+            )
+        )
+        if fechamento is None or fechamento.status != StatusFechamento.FECHADO:
+            msg = "Competência não está fechada"
+            raise ValueError(msg)
+        fechamento.status = StatusFechamento.ABERTO
+        for pend in list(fechamento.pendencias):
+            self._sessao.delete(pend)
+        self._sessao.commit()
+
+    @staticmethod
+    def _proxima_competencia(ano: int, mes: int) -> tuple[int, int]:
+        if mes == 12:
+            return ano + 1, 1
+        return ano, mes + 1
