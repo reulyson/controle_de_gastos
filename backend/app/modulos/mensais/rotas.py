@@ -34,14 +34,11 @@ def _aplicar_escopo_receita(
         linha.valor = valor
         return
     mensais = sessao.scalars(
-        select(ReceitaMensal).where(
-            ReceitaMensal.receita_id == linha.receita_id,
-            ReceitaMensal.ano == linha.ano,
-            ReceitaMensal.mes >= linha.mes,
-        )
+        select(ReceitaMensal).where(ReceitaMensal.receita_id == linha.receita_id)
     ).all()
     for m in mensais:
-        m.valor = valor
+        if m.ano > linha.ano or (m.ano == linha.ano and m.mes >= linha.mes):
+            m.valor = valor
     receita.valor = valor
 
 
@@ -58,14 +55,11 @@ def _aplicar_escopo_despesa(
         linha.valor = valor
         return
     mensais = sessao.scalars(
-        select(DespesaMensal).where(
-            DespesaMensal.despesa_id == linha.despesa_id,
-            DespesaMensal.ano == linha.ano,
-            DespesaMensal.mes >= linha.mes,
-        )
+        select(DespesaMensal).where(DespesaMensal.despesa_id == linha.despesa_id)
     ).all()
     for m in mensais:
-        m.valor = valor
+        if m.ano > linha.ano or (m.ano == linha.ano and m.mes >= linha.mes):
+            m.valor = valor
     despesa.valor = valor
 
 

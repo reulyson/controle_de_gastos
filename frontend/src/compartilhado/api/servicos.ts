@@ -99,6 +99,24 @@ export const api = {
     alternar: (body: PagamentoPayload) =>
       requisicaoApi<void>('/api/v1/pagamentos', { method: 'POST', body }),
   },
+  mensais: {
+    atualizarReceita: (
+      id: string,
+      body: { valor: number; escopo: 'somente_mes' | 'deste_mes_em_diante' },
+    ) =>
+      requisicaoApi<{ status: string }>(`/api/v1/receitas-mensais/${id}`, {
+        method: 'PATCH',
+        body,
+      }),
+    atualizarDespesa: (
+      id: string,
+      body: { valor: number; escopo: 'somente_mes' | 'deste_mes_em_diante' },
+    ) =>
+      requisicaoApi<{ status: string }>(`/api/v1/despesas-mensais/${id}`, {
+        method: 'PATCH',
+        body,
+      }),
+  },
   fechamentos: {
     fecharMes: (carteiraId: string, body: FechamentoMesPayload) =>
       requisicaoApi<void>(`/api/v1/carteiras/${carteiraId}/fechamentos`, {

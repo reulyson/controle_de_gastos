@@ -8,7 +8,10 @@ import { formatarMesCompleto } from '@/compartilhado/formatacao';
 import { Botao } from '@/compartilhado/ui/Botao';
 import { EstadoConsulta } from '@/compartilhado/ui/EstadoConsulta';
 import { ANOS_DISPONIVEIS, MESES } from '@/tema/tokens';
-import { GavetaDetalheCelula } from '@/funcionalidades/controle/GavetaDetalheCelula';
+import {
+  GavetaDetalheCelula,
+  type EscopoValorMensal,
+} from '@/funcionalidades/controle/GavetaDetalheCelula';
 import { IndicadoresControle } from '@/funcionalidades/controle/IndicadoresControle';
 import { ModalFecharMes } from '@/funcionalidades/controle/ModalFecharMes';
 import { TabelaFinanceiraAnual } from '@/funcionalidades/controle/TabelaFinanceiraAnual';
@@ -65,6 +68,29 @@ export function PaginaControle() {
       api.fechamentos.fecharMes(carteiraId!, { mes: mesResumo, ano }),
     onSuccess: async () => {
       setModalFechar(false);
+      if (carteiraId) {
+        await qc.invalidateQueries({
+          queryKey: chavesConsulta.grade.controle(carteiraId, ano, mesResumo),
+        });
+      }
+    },
+  });
+
+  const salvarValorCelula = useMutation({
+    mutationFn: async (args: {
+      celula: CelulaGrade;
+      valor: number;
+      escopo: EscopoValorMensal;
+    }) => {
+      const id = String(args.celula.id);
+      const body = { valor: args.valor, escopo: args.escopo };
+      if (args.celula.tipo === 'receita') {
+        return api.mensais.atualizarReceita(id, body);
+      }
+      return api.mensais.atualizarDespesa(id, body);
+    },
+    onSuccess: async () => {
+      setCelulaDetalhe(null);
       if (carteiraId) {
         await qc.invalidateQueries({
           queryKey: chavesConsulta.grade.controle(carteiraId, ano, mesResumo),
@@ -187,7 +213,20 @@ export function PaginaControle() {
       <GavetaDetalheCelula
         celula={celulaDetalhe?.celula ?? null}
         rotuloLinha={celulaDetalhe?.rotulo}
+        ano={ano}
+        salvando={salvarValorCelula.isPending || pagamento.isPending}
         onFechar={() => setCelulaDetalhe(null)}
+        onSalvarValor={(args) => salvarValorCelula.mutate(args)}
+        onAlternarPago={(celula, pago) => {
+          if (!celula.referencia_id) return;
+          pagamento.mutate({
+            tipo: celula.tipo,
+            referencia_id: celula.referencia_id,
+            mes: celula.mes,
+            ano,
+            pago,
+          });
+        }}
       />
 
       <GavetaDetalheFaturaCartao
