@@ -1,12 +1,14 @@
-import { requisicaoApi } from './cliente';
+import { definirAccessToken, requisicaoApi, tentarRefresh } from './cliente';
 import type {
-  AjusteExtratoPayload,
+  AtualizarCartaoPayload,
+  AtualizarLancamentoPayload,
   Cartao,
   Carteira,
   Categoria,
   CompraCartao,
   ConfiguracaoCarteira,
   CriarCartaoPayload,
+  CriarCarteiraPayload,
   CriarCompraPayload,
   CriarDespesaPayload,
   CriarReceitaPayload,
@@ -18,16 +20,53 @@ import type {
   Receita,
   RelatorioResumo,
   Tag,
+  TokenAuth,
+  UsuarioAuth,
 } from './tipos';
 
 export const api = {
+  auth: {
+    cadastrar: async (body: { email: string; nome: string; senha: string }) => {
+      const token = await requisicaoApi<TokenAuth>('/api/v1/auth/cadastro', {
+        method: 'POST',
+        body,
+        autenticado: false,
+      });
+      definirAccessToken(token.access_token);
+      return token;
+    },
+    login: async (body: { email: string; senha: string }) => {
+      const token = await requisicaoApi<TokenAuth>('/api/v1/auth/login', {
+        method: 'POST',
+        body,
+        autenticado: false,
+      });
+      definirAccessToken(token.access_token);
+      return token;
+    },
+    refresh: () => tentarRefresh(),
+    logout: () =>
+      requisicaoApi<void>('/api/v1/auth/logout', {
+        method: 'POST',
+        autenticado: false,
+      }),
+    eu: () => requisicaoApi<UsuarioAuth>('/api/v1/auth/eu'),
+    atualizarPerfil: (body: { nome: string }) =>
+      requisicaoApi<UsuarioAuth>('/api/v1/auth/eu', { method: 'PATCH', body }),
+  },
   carteiras: {
     listar: () => requisicaoApi<Carteira[]>('/api/v1/carteiras'),
+    criar: (body: CriarCarteiraPayload) =>
+      requisicaoApi<Carteira>('/api/v1/carteiras', { method: 'POST', body }),
+    definirPadrao: (id: string) =>
+      requisicaoApi<Carteira>(`/api/v1/carteiras/${id}/padrao`, { method: 'PATCH' }),
     atualizarConfig: (id: string, body: ConfiguracaoCarteira) =>
       requisicaoApi<Carteira>(`/api/v1/carteiras/${id}`, {
         method: 'PATCH',
         body,
       }),
+    listarAnos: (id: string) =>
+      requisicaoApi<{ anos: number[] }>(`/api/v1/carteiras/${id}/anos`),
     gradeControle: (id: string, ano: number, mes?: number) => {
       const params = mes !== undefined ? `?mes=${mes}` : '';
       return requisicaoApi<GradeControle>(
@@ -36,24 +75,14 @@ export const api = {
     },
     relatorio: (id: string, ano: number) =>
       requisicaoApi<RelatorioResumo>(`/api/v1/carteiras/${id}/anos/${ano}/relatorio`),
-    ajustarExtrato: (id: string, body: AjusteExtratoPayload) =>
-      requisicaoApi<void>(`/api/v1/carteiras/${id}/ajustes-extrato`, {
-        method: 'POST',
-        body,
-      }),
-    reabrirMes: (id: string, mes: number, ano: number) =>
-      requisicaoApi<void>(`/api/v1/carteiras/${id}/fechamentos/reabrir`, {
-        method: 'POST',
-        body: { mes, ano },
-      }),
   },
   receitas: {
     listar: (carteiraId: string) =>
       requisicaoApi<Receita[]>(`/api/v1/receitas?carteira_id=${carteiraId}`),
     criar: (body: CriarReceitaPayload) =>
       requisicaoApi<Receita>('/api/v1/receitas', { method: 'POST', body }),
-    atualizar: (id: string, body: Partial<CriarReceitaPayload>) =>
-      requisicaoApi<Receita>(`/api/v1/receitas/${id}`, { method: 'PUT', body }),
+    atualizar: (id: string, body: AtualizarLancamentoPayload) =>
+      requisicaoApi<Receita>(`/api/v1/receitas/${id}`, { method: 'PATCH', body }),
     excluir: (id: string) =>
       requisicaoApi<void>(`/api/v1/receitas/${id}`, { method: 'DELETE' }),
   },
@@ -62,14 +91,14 @@ export const api = {
       requisicaoApi<Despesa[]>(`/api/v1/despesas?carteira_id=${carteiraId}`),
     criar: (body: CriarDespesaPayload) =>
       requisicaoApi<Despesa>('/api/v1/despesas', { method: 'POST', body }),
-    atualizar: (id: string, body: Partial<CriarDespesaPayload>) =>
-      requisicaoApi<Despesa>(`/api/v1/despesas/${id}`, { method: 'PUT', body }),
+    atualizar: (id: string, body: AtualizarLancamentoPayload) =>
+      requisicaoApi<Despesa>(`/api/v1/despesas/${id}`, { method: 'PATCH', body }),
     excluir: (id: string) =>
       requisicaoApi<void>(`/api/v1/despesas/${id}`, { method: 'DELETE' }),
   },
   categorias: {
     listar: () => requisicaoApi<Categoria[]>('/api/v1/categorias'),
-    criar: (body: { nome: string; tipo: Categoria['tipo'] }) =>
+    criar: (body: { nome: string; tipo?: Categoria['tipo'] }) =>
       requisicaoApi<Categoria>('/api/v1/categorias', { method: 'POST', body }),
     excluir: (id: string) =>
       requisicaoApi<void>(`/api/v1/categorias/${id}`, { method: 'DELETE' }),
@@ -84,6 +113,8 @@ export const api = {
       requisicaoApi<Cartao[]>(`/api/v1/cartoes?carteira_id=${carteiraId}`),
     criar: (body: CriarCartaoPayload) =>
       requisicaoApi<Cartao>('/api/v1/cartoes', { method: 'POST', body }),
+    atualizar: (id: string, body: AtualizarCartaoPayload) =>
+      requisicaoApi<Cartao>(`/api/v1/cartoes/${id}`, { method: 'PATCH', body }),
     fatura: (id: string, ano: number, mes: number) =>
       requisicaoApi<FaturaCartaoDetalhe>(
         `/api/v1/cartoes/${id}/faturas/${ano}/${mes}`,
@@ -120,6 +151,11 @@ export const api = {
   fechamentos: {
     fecharMes: (carteiraId: string, body: FechamentoMesPayload) =>
       requisicaoApi<void>(`/api/v1/carteiras/${carteiraId}/fechamentos`, {
+        method: 'POST',
+        body,
+      }),
+    reabrirMes: (carteiraId: string, body: FechamentoMesPayload) =>
+      requisicaoApi<void>(`/api/v1/carteiras/${carteiraId}/fechamentos/reabrir`, {
         method: 'POST',
         body,
       }),

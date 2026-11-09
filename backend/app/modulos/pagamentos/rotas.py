@@ -5,15 +5,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.dominio.liquidacao import SaldoInsuficienteError
+from app.modulos.modelos import Usuario
 from app.nucleo.banco import obter_sessao
+from app.nucleo.deps_auth import obter_usuario_atual
 from app.nucleo_financeiro.servico_pagamentos import ServicoPagamentos
 
 roteador = APIRouter(prefix="/pagamentos", tags=["Pagamentos"])
 
 
 class PagamentoCorpo(BaseModel):
-    """Alternar pago/recebido."""
-
     tipo: str = Field(..., pattern="^(receita|despesa|cartao)$")
     referencia_id: int | str
     mes: int = Field(..., ge=1, le=12)
@@ -26,8 +26,12 @@ class PagamentoCorpo(BaseModel):
 
 
 @roteador.post("", status_code=204)
-def alternar_pagamento(corpo: PagamentoCorpo, sessao: Session = Depends(obter_sessao)) -> None:
-    """Marca ou desmarca pagamento/recebimento."""
+def alternar_pagamento(
+    corpo: PagamentoCorpo,
+    sessao: Session = Depends(obter_sessao),
+    usuario: Usuario = Depends(obter_usuario_atual),
+) -> None:
+    _ = usuario
     try:
         ServicoPagamentos(sessao).alternar(
             corpo.tipo,

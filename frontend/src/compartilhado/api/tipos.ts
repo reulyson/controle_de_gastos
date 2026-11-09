@@ -4,18 +4,40 @@ export type RecorrenciaLancamento = 'unica' | 'mensal';
 
 export type IdRecurso = string | number;
 
+export interface UsuarioAuth {
+  id: IdRecurso;
+  email: string;
+  nome: string;
+}
+
+export interface TokenAuth {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+}
+
+export type TipoCarteira = 'pessoal' | 'empresarial' | 'conjunto';
+
 export interface Carteira {
   id: IdRecurso;
   nome: string;
+  tipo_carteira?: TipoCarteira;
   ano_padrao?: number;
   saldo_inicial?: number;
+  saldo_atual?: number;
   limite_cheque?: number;
+  padrao?: boolean;
 }
+
+export type TipoCategoria = TipoLancamento | 'compra' | 'ambos';
+
+export type OrigemCategoria = 'padrao' | 'pessoal';
 
 export interface Categoria {
   id: IdRecurso;
   nome: string;
-  tipo: TipoLancamento | 'ambos';
+  tipo: TipoCategoria;
+  origem?: OrigemCategoria;
   cor?: string;
 }
 
@@ -52,6 +74,7 @@ export interface Cartao {
   carteira_id: IdRecurso;
   nome: string;
   bandeira?: string;
+  final_4?: string | null;
   dia_fechamento?: number;
   dia_vencimento?: number;
   limite?: number;
@@ -85,6 +108,7 @@ export interface LinhaGrade {
   secao: 'RECEITAS' | 'DESPESAS' | 'CARTOES';
   rotulo: string;
   categoria?: string;
+  recorrencia?: RecorrenciaLancamento;
   celulas: CelulaGrade[];
   total_anual?: number;
 }
@@ -103,6 +127,7 @@ export interface IndicadoresMes {
   receitas: number;
   despesas: number;
   orcado: number;
+  total_pago?: number;
   pendencias: number;
 }
 
@@ -133,13 +158,8 @@ export interface PagamentoPayload {
 export interface ConfiguracaoCarteira {
   limite_cheque?: number;
   saldo_inicial?: number;
+  tipo_carteira?: TipoCarteira;
   ano_padrao?: number;
-}
-
-export interface AjusteExtratoPayload {
-  valor: number;
-  descricao?: string;
-  data?: string;
 }
 
 export interface RelatorioResumo {
@@ -152,21 +172,50 @@ export interface CriarReceitaPayload {
   descricao: string;
   valor: number;
   categoria_id?: IdRecurso | null;
-  tag_ids?: IdRecurso[];
   recorrencia: RecorrenciaLancamento;
   mes_referencia?: number;
   ano_referencia?: number;
+  quantidade_meses?: number;
+  valor_variavel?: boolean;
 }
 
 export type CriarDespesaPayload = CriarReceitaPayload;
+
+export interface AtualizarLancamentoPayload {
+  descricao?: string;
+  valor?: number;
+  categoria_id?: IdRecurso | null;
+  recorrencia?: RecorrenciaLancamento;
+  valor_variavel?: boolean;
+  ativo?: boolean;
+}
 
 export interface CriarCartaoPayload {
   carteira_id: IdRecurso;
   nome: string;
   bandeira?: string;
+  final_4?: string;
   dia_fechamento?: number;
   dia_vencimento?: number;
   limite?: number;
+}
+
+export interface AtualizarCartaoPayload {
+  nome?: string;
+  bandeira?: string;
+  final_4?: string;
+  dia_fechamento?: number;
+  dia_vencimento?: number;
+  limite?: number;
+}
+
+export interface CriarCarteiraPayload {
+  nome: string;
+  tipo_carteira?: TipoCarteira;
+  limite_cheque?: number;
+  saldo_inicial?: number;
+  ano_padrao?: number;
+  padrao?: boolean;
 }
 
 export interface CriarCompraPayload {
@@ -174,9 +223,12 @@ export interface CriarCompraPayload {
   descricao: string;
   valor: number;
   parcelas?: number;
+  quantidade_meses?: number;
   recorrencia?: RecorrenciaLancamento;
-  mes_referencia: number;
-  ano_referencia: number;
+  data_vencimento?: string;
+  mes_referencia?: number;
+  ano_referencia?: number;
+  categoria_id?: IdRecurso | null;
 }
 
 export interface FaturaCartaoDetalhe {

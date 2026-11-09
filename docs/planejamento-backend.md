@@ -29,16 +29,15 @@ Unicidades: `(receita_id|despesa_id, ano, mes)`, `(cartao_id, competencia)`.
 | `servico_pagamentos` | Toggle pago/recebido; bloqueia se `saldo < -limite` |
 | `servico_recorrencia` | Gera mensais (única / mensal N vezes ou até mês) |
 | `servico_fechamento` | Snapshot; pendências; saldo final → próximo inicial; reabrir |
-| `servico_fluxo_caixa` | Movimentações e ajuste de extrato |
 | `ServicoGrade` | Monta linhas anuais RECEITAS/DESPESAS/CARTÕES |
 
 ## API REST (`/api/v1`)
 
 | Área | Exemplos |
 |------|----------|
-| Carteiras | `GET/PATCH /carteiras`, `GET .../anos/{ano}/grade-controle?mes=` |
+| Auth | `POST /auth/cadastro`, `/login`, `/refresh`, `/logout`, `GET /auth/eu` |
+| Carteiras | `GET/POST /carteiras`, `PATCH .../padrao`, `GET .../anos/{ano}/grade-controle?mes=` |
 | Relatório | `GET .../anos/{ano}/relatorio` |
-| Extrato | `POST .../ajustes-extrato` |
 | Fechamento | `POST .../fechamentos`, `POST .../fechamentos/reabrir` |
 | Receitas/Despesas | CRUD + `PATCH ...-mensais/{id}` |
 | Pagamentos | `POST /pagamentos` |

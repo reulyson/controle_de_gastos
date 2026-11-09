@@ -1,4 +1,6 @@
+import { ProvedorAuth } from '@/compartilhado/contexto/ContextoAuth';
 import { ProvedorCarteira } from '@/compartilhado/contexto/ContextoCarteira';
+import { ProvedorResumoMes } from '@/compartilhado/contexto/ContextoResumoMes';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
@@ -19,7 +21,11 @@ export function Provedores({ children }: { children: ReactNode }) {
 
   return (
     <QueryClientProvider client={cliente}>
-      <ProvedorCarteira>{children}</ProvedorCarteira>
+      <ProvedorAuth>
+        <ProvedorCarteira>
+          <ProvedorResumoMes>{children}</ProvedorResumoMes>
+        </ProvedorCarteira>
+      </ProvedorAuth>
     </QueryClientProvider>
   );
 }

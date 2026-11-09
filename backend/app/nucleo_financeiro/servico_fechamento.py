@@ -7,33 +7,48 @@ from sqlalchemy.orm import Session
 
 from app.dominio.dinheiro import decimal_de
 from app.dominio.enumeracoes import StatusFechamento
-from app.modulos.modelos import DespesaMensal, FechamentoMensal, FechamentoPendencia, ReceitaMensal
+from app.modulos.modelos import (
+    Despesa,
+    DespesaMensal,
+    FechamentoMensal,
+    FechamentoPendencia,
+    Receita,
+    ReceitaMensal,
+)
 from app.nucleo_financeiro.servico_calculos import ServicoCalculos
 
 
 class ServicoFechamento:
     """Fecha competência propagando saldo e registrando pendências."""
 
-    def __init__(self, sessao: Session) -> None:
+    def __init__(self, sessao: Session, carteira_id: int) -> None:
         self._sessao = sessao
-        self._calculos = ServicoCalculos(sessao)
+        self._carteira_id = carteira_id
+        self._calculos = ServicoCalculos(sessao, carteira_id)
+
+    def status_meses(self, conta_id: int, ano: int) -> list[dict]:
+        """Lista status aberto/fechado dos 12 meses."""
+        fechamentos = {
+            f.mes: f.status
+            for f in self._sessao.scalars(
+                select(FechamentoMensal).where(
+                    FechamentoMensal.conta_id == conta_id,
+                    FechamentoMensal.ano == ano,
+                )
+            )
+        }
+        return [
+            {
+                "mes": m,
+                "status": "fechado"
+                if fechamentos.get(m) == StatusFechamento.FECHADO
+                else "aberto",
+            }
+            for m in range(1, 13)
+        ]
 
     def fechar_mes(self, ano: int, mes: int) -> FechamentoMensal:
-        """Fecha mês atual e prepara saldo inicial do próximo.
-
-        Pendências referenciam lançamentos não quitados sem duplicar linhas.
-
-        Args:
-            ano: Ano a fechar.
-            mes: Mês a fechar.
-
-        Returns:
-            FechamentoMensal: Registro de fechamento.
-
-        Raises:
-            ValueError: Se mês já estiver fechado.
-        """
-        conta = self._calculos.obter_conta_unica()
+        conta = self._calculos.obter_conta()
         existente = self._sessao.scalar(
             select(FechamentoMensal).where(
                 FechamentoMensal.conta_id == conta.id,
@@ -42,8 +57,7 @@ class ServicoFechamento:
             )
         )
         if existente is not None and existente.status == StatusFechamento.FECHADO:
-            msg = "Competência já fechada"
-            raise ValueError(msg)
+            raise ValueError("Competência já fechada")
 
         saldo_inicial = self._calculos.saldo_inicial_competencia(ano, mes)
         totais = self._calculos.totais_competencia(ano, mes)
@@ -76,12 +90,15 @@ class ServicoFechamento:
         return fechamento
 
     def _registrar_pendencias(self, fechamento: FechamentoMensal, ano: int, mes: int) -> None:
-        """Adiciona pendências para itens não pagos/recebidos."""
+        cid = self._carteira_id
         for despesa in self._sessao.scalars(
-            select(DespesaMensal).where(
+            select(DespesaMensal)
+            .join(Despesa)
+            .where(
                 DespesaMensal.ano == ano,
                 DespesaMensal.mes == mes,
                 DespesaMensal.pago.is_(False),
+                Despesa.carteira_id == cid,
             )
         ):
             self._sessao.add(
@@ -94,10 +111,13 @@ class ServicoFechamento:
                 )
             )
         for receita in self._sessao.scalars(
-            select(ReceitaMensal).where(
+            select(ReceitaMensal)
+            .join(Receita)
+            .where(
                 ReceitaMensal.ano == ano,
                 ReceitaMensal.mes == mes,
                 ReceitaMensal.recebido.is_(False),
+                Receita.carteira_id == cid,
             )
         ):
             self._sessao.add(
@@ -117,7 +137,6 @@ class ServicoFechamento:
         mes: int,
         saldo_inicial: Decimal,
     ) -> None:
-        """Define saldo_inicial do próximo mês via registro aberto."""
         proximo = self._sessao.scalar(
             select(FechamentoMensal).where(
                 FechamentoMensal.conta_id == conta_id,
@@ -140,16 +159,7 @@ class ServicoFechamento:
             proximo.saldo_inicial = decimal_de(saldo_inicial)
 
     def reabrir_mes(self, ano: int, mes: int) -> None:
-        """Reabre competência fechada.
-
-        Args:
-            ano: Ano a reabrir.
-            mes: Mês a reabrir.
-
-        Raises:
-            ValueError: Se mês não estiver fechado.
-        """
-        conta = self._calculos.obter_conta_unica()
+        conta = self._calculos.obter_conta()
         fechamento = self._sessao.scalar(
             select(FechamentoMensal).where(
                 FechamentoMensal.conta_id == conta.id,
@@ -158,8 +168,7 @@ class ServicoFechamento:
             )
         )
         if fechamento is None or fechamento.status != StatusFechamento.FECHADO:
-            msg = "Competência não está fechada"
-            raise ValueError(msg)
+            raise ValueError("Competência não está fechada")
         fechamento.status = StatusFechamento.ABERTO
         for pend in list(fechamento.pendencias):
             self._sessao.delete(pend)

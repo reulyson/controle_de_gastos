@@ -4,7 +4,7 @@ import { api } from '@/compartilhado/api/servicos';
 import { chavesConsulta } from '@/compartilhado/api/chavesConsulta';
 import type { Despesa, Receita, TipoLancamento } from '@/compartilhado/api/tipos';
 import { useCarteira } from '@/compartilhado/contexto/ContextoCarteira';
-import { formatarMoeda, idComoTexto } from '@/compartilhado/formatacao';
+import { formatarMoeda, formatarTitulo, idComoTexto } from '@/compartilhado/formatacao';
 import { Botao } from '@/compartilhado/ui/Botao';
 import { EstadoConsulta } from '@/compartilhado/ui/EstadoConsulta';
 import { GavetaFormularioLancamento } from '@/funcionalidades/lancamentos/GavetaFormularioLancamento';
@@ -87,7 +87,7 @@ export function PaginaLancamentos({ tipo }: PaginaLancamentosProps) {
             <tbody>
               {consulta.data?.map((item) => (
                 <tr key={item.id} className="border-t border-slate-100">
-                  <td className="px-4 py-3 font-medium">{item.descricao}</td>
+                  <td className="px-4 py-3 font-medium">{formatarTitulo(item.descricao)}</td>
                   <td className="px-4 py-3 capitalize text-slate-600">{item.recorrencia}</td>
                   <td className="px-4 py-3 text-right font-semibold tabular-nums">
                     {formatarMoeda(item.valor)}

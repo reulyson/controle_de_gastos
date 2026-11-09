@@ -13,7 +13,7 @@ class TotaisCompetencia:
     Attributes:
         total_receita: Soma de receitas previstas/realizadas.
         total_despesa: Soma de despesas previstas/realizadas.
-        total_orcado: Despesas + receitas planejadas (despesa - receita planejada líquida).
+        total_orcado: Receitas menos despesas (positivo = sobra; negativo = déficit).
         total_pago: Valores efetivamente pagos no período.
         saldo_caixa: Saldo de caixa após movimentos.
     """
@@ -38,12 +38,12 @@ class TotaisCompetencia:
         return cls(saldo_caixa=saldo)
 
     def calcular_orcado(self) -> Decimal:
-        """Orçado líquido = despesas orçadas menos receitas orçadas.
+        """Orçado líquido = receitas orçadas menos despesas orçadas.
 
         Returns:
             Decimal: Valor orçado líquido.
         """
-        return decimal_de(self.total_despesa - self.total_receita)
+        return decimal_de(self.total_receita - self.total_despesa)
 
     def calcular_saldo_caixa(
         self,
@@ -88,7 +88,7 @@ def consolidar_totais(
     totais = TotaisCompetencia(
         total_receita=total_receita,
         total_despesa=total_despesa,
-        total_orcado=decimal_de(total_despesa - total_receita),
+        total_orcado=decimal_de(total_receita - total_despesa),
         total_pago=total_pago,
         saldo_caixa=saldo,
     )

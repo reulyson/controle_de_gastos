@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/compartilhado/api/servicos';
 import { chavesConsulta } from '@/compartilhado/api/chavesConsulta';
-import type { CelulaGrade, IdRecurso, LinhaGrade, TotaisGrade } from '@/compartilhado/api/tipos';
+import type { CelulaGrade, IdRecurso, LinhaGrade } from '@/compartilhado/api/tipos';
 import { useCarteira } from '@/compartilhado/contexto/ContextoCarteira';
+import { useResumoMes } from '@/compartilhado/contexto/ContextoResumoMes';
 import { formatarMesCompleto } from '@/compartilhado/formatacao';
 import { Botao } from '@/compartilhado/ui/Botao';
 import { EstadoConsulta } from '@/compartilhado/ui/EstadoConsulta';
-import { ANOS_DISPONIVEIS, MESES } from '@/tema/tokens';
+import { MESES } from '@/tema/tokens';
 import {
   GavetaDetalheCelula,
   type EscopoValorMensal,
@@ -17,22 +18,15 @@ import { ModalFecharMes } from '@/funcionalidades/controle/ModalFecharMes';
 import { TabelaFinanceiraAnual } from '@/funcionalidades/controle/TabelaFinanceiraAnual';
 import { GavetaDetalheFaturaCartao } from '@/funcionalidades/cartoes/GavetaDetalheFaturaCartao';
 
-const totaisVazios: TotaisGrade = {
-  total_receita: 0,
-  total_despesa: 0,
-  total_orcado: 0,
-  total_pago: 0,
-  caixa: 0,
-};
-
 export function PaginaControle() {
-  const { carteiraId, anoPadrao } = useCarteira();
+  const { carteiraId, anoSelecionado: ano } = useCarteira();
+  const { definirResumoMes, limparResumoMes } = useResumoMes();
   const qc = useQueryClient();
-  const [ano, setAno] = useState(anoPadrao);
   const [mesResumo, setMesResumo] = useState(new Date().getMonth() + 1);
   const [celulaDetalhe, setCelulaDetalhe] = useState<{
     celula: CelulaGrade;
     rotulo: string;
+    recorrente: boolean;
   } | null>(null);
   const [faturaContexto, setFaturaContexto] = useState<{
     cartaoId: IdRecurso;
@@ -40,7 +34,6 @@ export function PaginaControle() {
     rotulo: string;
   } | null>(null);
   const [modalFechar, setModalFechar] = useState(false);
-  const [celulaAlternando, setCelulaAlternando] = useState<IdRecurso | null>(null);
 
   const consulta = useQuery({
     queryKey: carteiraId
@@ -52,9 +45,7 @@ export function PaginaControle() {
 
   const pagamento = useMutation({
     mutationFn: api.pagamentos.alternar,
-    onMutate: ({ referencia_id }) => setCelulaAlternando(referencia_id),
     onSettled: async () => {
-      setCelulaAlternando(null);
       if (carteiraId) {
         await qc.invalidateQueries({
           queryKey: chavesConsulta.grade.controle(carteiraId, ano, mesResumo),
@@ -101,21 +92,22 @@ export function PaginaControle() {
 
   const grade = consulta.data;
   const linhas = grade?.linhas ?? [];
-  const totais = grade?.totais ?? totaisVazios;
   const indicadores = grade?.indicadores;
 
   const mesFechado = grade?.mes_fechado ?? false;
 
-  const alternarPago = (celula: CelulaGrade) => {
-    if (!celula.referencia_id) return;
-    pagamento.mutate({
-      tipo: celula.tipo,
-      referencia_id: celula.referencia_id,
-      mes: celula.mes,
-      ano,
-      pago: !celula.pago,
+  useEffect(() => {
+    if (!indicadores) {
+      limparResumoMes();
+      return;
+    }
+    definirResumoMes({
+      saldoCarteira: Number(indicadores.saldo_caixa),
+      chequeLivre: Number(indicadores.cheque_livre),
     });
-  };
+  }, [definirResumoMes, indicadores, limparResumoMes]);
+
+  useEffect(() => () => limparResumoMes(), [limparResumoMes]);
 
   const abrirFatura = (linha: LinhaGrade, mes: number) => {
     const ref = linha.celulas.find((c) => c.mes === mes)?.referencia_id ?? linha.id;
@@ -138,53 +130,14 @@ export function PaginaControle() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Painel de controle</h2>
-          <p className="text-sm text-slate-500">Grade anual com visão do mês selecionado</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="text-xs font-semibold text-slate-500">
-            Ano
-            <select
-              className="fin-input ml-2 w-auto min-w-[100px]"
-              value={ano}
-              onChange={(e) => setAno(Number(e.target.value))}
-            >
-              {ANOS_DISPONIVEIS.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-            </select>
-          </label>
-          <Botao
-            variante="secundario"
-            icone={<span className="material-symbols-outlined text-base">lock</span>}
-            onClick={() => setModalFechar(true)}
-            disabled={mesFechado}
-          >
-            {mesFechado ? 'Mês fechado' : 'Fechar mês'}
-          </Botao>
-        </div>
+    <div className="space-y-3">
+      <div>
+        <h2 className="text-xl font-bold leading-tight text-slate-800">Painel de controle</h2>
+        <p className="text-xs text-slate-500">Grade anual com visão do mês selecionado</p>
       </div>
 
-      <div className="fin-panel p-4">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h3 className="font-semibold text-slate-800">{tituloResumo}</h3>
-          <select
-            className="fin-input w-auto min-w-[160px]"
-            value={mesResumo}
-            onChange={(e) => setMesResumo(Number(e.target.value))}
-          >
-            {MESES.map((m) => (
-              <option key={m.valor} value={m.valor}>
-                {m.rotulo}
-              </option>
-            ))}
-          </select>
-        </div>
+      <div className="fin-panel p-3">
+        <h3 className="mb-3 text-sm font-semibold text-slate-800">{tituloResumo}</h3>
         <EstadoConsulta
           carregando={consulta.isLoading}
           erro={consulta.error instanceof Error ? consulta.error : null}
@@ -199,20 +152,50 @@ export function PaginaControle() {
         erro={consulta.error instanceof Error ? consulta.error : null}
         onRecarregar={() => void consulta.refetch()}
       >
-        <TabelaFinanceiraAnual
-          linhas={linhas}
-          totais={totais}
-          mesResumo={mesResumo}
-          onAbrirDetalhe={(celula, rotulo) => setCelulaDetalhe({ celula, rotulo })}
-          onAlternarPago={alternarPago}
-          celulaAlternando={celulaAlternando}
-          onAbrirFatura={abrirFatura}
-        />
+        <div className="fin-panel overflow-hidden">
+          <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-3 py-2">
+            <select
+              className="fin-input w-auto min-w-[140px] py-1.5 text-sm"
+              value={mesResumo}
+              onChange={(e) => setMesResumo(Number(e.target.value))}
+              aria-label="Mês da visão"
+            >
+              {MESES.map((m) => (
+                <option key={m.valor} value={m.valor}>
+                  {m.rotulo}
+                </option>
+              ))}
+            </select>
+            <Botao
+              variante="secundario"
+              className="px-3 py-1.5 text-xs"
+              icone={<span className="material-symbols-outlined text-sm">lock</span>}
+              onClick={() => setModalFechar(true)}
+              disabled={mesFechado}
+            >
+              {mesFechado ? 'Mês fechado' : 'Fechar mês'}
+            </Botao>
+          </div>
+          <TabelaFinanceiraAnual
+            linhas={linhas}
+            mesResumo={mesResumo}
+            onAbrirDetalhe={(celula, linha) =>
+              setCelulaDetalhe({
+                celula,
+                rotulo: linha.rotulo,
+                recorrente: linha.recorrencia === 'mensal',
+              })
+            }
+            onAbrirFatura={abrirFatura}
+            semPainel
+          />
+        </div>
       </EstadoConsulta>
 
       <GavetaDetalheCelula
         celula={celulaDetalhe?.celula ?? null}
         rotuloLinha={celulaDetalhe?.rotulo}
+        recorrente={celulaDetalhe?.recorrente ?? false}
         ano={ano}
         salvando={salvarValorCelula.isPending || pagamento.isPending}
         onFechar={() => setCelulaDetalhe(null)}

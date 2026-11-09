@@ -22,7 +22,7 @@ def test_consolidar_totais_saldo_caixa():
     )
     assert totais.total_receita == decimal_de("1200.50")
     assert totais.total_despesa == decimal_de("800.00")
-    assert totais.total_orcado == decimal_de("-400.50")
+    assert totais.total_orcado == decimal_de("400.50")
     assert totais.total_pago == decimal_de("300.00")
     assert totais.saldo_caixa == decimal_de("1000.50")
 
@@ -51,3 +51,20 @@ def test_gerar_ocorrencias_mensais():
     assert len(ocs) == 3
     assert ocs[0].competencia == Competencia(2025, 1)
     assert ocs[2].competencia == Competencia(2025, 3)
+    assert [oc.valor for oc in ocs] == [Decimal("100.00")] * 3
+
+
+def test_gerar_ocorrencias_mensais_valor_variavel():
+    ocs = gerar_ocorrencias(
+        TipoRecorrencia.MENSAL,
+        Decimal("100.00"),
+        Competencia(2025, 1),
+        quantidade_meses=3,
+        valor_variavel=True,
+    )
+    assert len(ocs) == 3
+    assert [oc.valor for oc in ocs] == [
+        Decimal("100.00"),
+        Decimal("0.00"),
+        Decimal("0.00"),
+    ]

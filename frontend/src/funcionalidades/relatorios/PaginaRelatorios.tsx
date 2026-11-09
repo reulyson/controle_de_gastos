@@ -1,5 +1,4 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
 import {
   Bar,
   BarChart,
@@ -17,11 +16,10 @@ import { chavesConsulta } from '@/compartilhado/api/chavesConsulta';
 import { useCarteira } from '@/compartilhado/contexto/ContextoCarteira';
 import { formatarMesAbreviado, formatarMoeda } from '@/compartilhado/formatacao';
 import { EstadoConsulta } from '@/compartilhado/ui/EstadoConsulta';
-import { ANOS_DISPONIVEIS, CORES_GRAFICO } from '@/tema/tokens';
+import { CORES_GRAFICO } from '@/tema/tokens';
 
 export function PaginaRelatorios() {
-  const { carteiraId, anoPadrao } = useCarteira();
-  const [ano, setAno] = useState(anoPadrao);
+  const { carteiraId, anoSelecionado: ano } = useCarteira();
 
   const consulta = useQuery({
     queryKey: carteiraId ? chavesConsulta.relatorio.resumo(carteiraId, ano) : ['relatorio-vazio'],
@@ -43,25 +41,9 @@ export function PaginaRelatorios() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Relatórios</h2>
-          <p className="text-sm text-slate-500">Visão gráfica quando houver dados</p>
-        </div>
-        <label className="text-xs font-semibold text-slate-500">
-          Ano
-          <select
-            className="fin-input ml-2 w-auto"
-            value={ano}
-            onChange={(e) => setAno(Number(e.target.value))}
-          >
-            {ANOS_DISPONIVEIS.map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
-          </select>
-        </label>
+      <div>
+        <h2 className="text-2xl font-bold text-slate-800">Relatórios</h2>
+        <p className="text-sm text-slate-500">Visão gráfica quando houver dados</p>
       </div>
 
       <EstadoConsulta

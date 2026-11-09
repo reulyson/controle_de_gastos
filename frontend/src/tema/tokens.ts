@@ -1,7 +1,3 @@
-export const ANOS_DISPONIVEIS = [2026, 2027, 2028] as const;
-
-export type AnoDisponivel = (typeof ANOS_DISPONIVEIS)[number];
-
 export const MESES = [
   { valor: 1, rotulo: 'Janeiro' },
   { valor: 2, rotulo: 'Fevereiro' },

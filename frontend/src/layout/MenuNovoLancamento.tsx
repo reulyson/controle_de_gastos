@@ -19,7 +19,8 @@ export function MenuNovoLancamento() {
     <>
       <div className="relative">
         <Botao
-          icone={<span className="material-symbols-outlined text-base">add</span>}
+          className="px-3 py-1 text-xs"
+          icone={<span className="material-symbols-outlined text-sm">add</span>}
           onClick={() => setMenuAberto((v) => !v)}
         >
           Novo lançamento

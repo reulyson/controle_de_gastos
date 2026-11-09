@@ -17,14 +17,38 @@ from app.modulos.modelos import (
     ReceitaMensal,
 )
 from app.nucleo_financeiro.servico_calculos import ServicoCalculos
+from app.nucleo_financeiro.servico_fechamento import ServicoFechamento
 
 
 class ServicoGrade:
     """Constrói payload da grade de controle para o frontend."""
 
-    def __init__(self, sessao: Session) -> None:
+    def __init__(self, sessao: Session, carteira_id: int | None = None) -> None:
         self._sessao = sessao
-        self._calculos = ServicoCalculos(sessao)
+        self._carteira_id = carteira_id
+        self._calculos = ServicoCalculos(sessao, carteira_id)
+
+    def listar_anos_com_dados(self, carteira_id: int) -> list[int]:
+        """Anos com receita/despesa mensal ou fatura na carteira (ordenados)."""
+        anos_receita = self._sessao.scalars(
+            select(ReceitaMensal.ano)
+            .join(Receita)
+            .where(Receita.carteira_id == carteira_id)
+            .distinct()
+        ).all()
+        anos_despesa = self._sessao.scalars(
+            select(DespesaMensal.ano)
+            .join(Despesa)
+            .where(Despesa.carteira_id == carteira_id)
+            .distinct()
+        ).all()
+        anos_fatura = self._sessao.scalars(
+            select(Fatura.ano)
+            .join(Cartao)
+            .where(Cartao.carteira_id == carteira_id)
+            .distinct()
+        ).all()
+        return sorted({*anos_receita, *anos_despesa, *anos_fatura})
 
     def montar(
         self,
@@ -32,26 +56,19 @@ class ServicoGrade:
         ano: int,
         mes_selecionado: int,
     ) -> dict:
-        """Monta grade completa com 12 células por linha.
-
-        Args:
-            carteira_id: ID da carteira.
-            ano: Ano da grade.
-            mes_selecionado: Mês em foco nos indicadores.
-
-        Returns:
-            dict: Estrutura compatível com GradeControle do frontend.
-        """
-        conta = self._calculos.obter_conta_unica()
+        """Monta grade completa com 12 células por linha."""
+        self._carteira_id = carteira_id
+        self._calculos = ServicoCalculos(self._sessao, carteira_id)
+        conta = self._calculos.obter_conta(carteira_id)
         indicadores = self._calculos.indicadores_mes(ano, mes_selecionado)
         mes_fechado = self._mes_fechado(conta.id, ano, mes_selecionado)
         linhas = (
-            self._linhas_receitas(ano)
-            + self._linhas_despesas(ano)
+            self._linhas_receitas(ano, carteira_id)
+            + self._linhas_despesas(ano, carteira_id)
             + self._linhas_cartoes(carteira_id, ano)
         )
-        totais = self._totais_anuais(ano, mes_selecionado)
-        meses = self._status_meses(conta.id, ano)
+        totais = self._totais_anuais(ano, mes_selecionado, carteira_id)
+        meses = ServicoFechamento(self._sessao, carteira_id).status_meses(conta.id, ano)
         return {
             "ano": ano,
             "mes_selecionado": mes_selecionado,
@@ -72,26 +89,6 @@ class ServicoGrade:
             )
         )
         return fechamento is not None and fechamento.status == StatusFechamento.FECHADO
-
-    def _status_meses(self, conta_id: int, ano: int) -> list[dict]:
-        fechamentos = {
-            f.mes: f.status
-            for f in self._sessao.scalars(
-                select(FechamentoMensal).where(
-                    FechamentoMensal.conta_id == conta_id,
-                    FechamentoMensal.ano == ano,
-                )
-            )
-        }
-        return [
-            {
-                "mes": m,
-                "status": "fechado"
-                if fechamentos.get(m) == StatusFechamento.FECHADO
-                else "aberto",
-            }
-            for m in range(1, 13)
-        ]
 
     def _preencher_celulas(
         self,
@@ -130,10 +127,10 @@ class ServicoGrade:
                 )
         return celulas, total
 
-    def _linhas_receitas(self, ano: int) -> list[dict]:
+    def _linhas_receitas(self, ano: int, carteira_id: int) -> list[dict]:
         receitas = self._sessao.scalars(
             select(Receita)
-            .where(Receita.ativo.is_(True))
+            .where(Receita.ativo.is_(True), Receita.carteira_id == carteira_id)
             .options(joinedload(Receita.mensais))
         ).unique().all()
         linhas: list[dict] = []
@@ -149,16 +146,17 @@ class ServicoGrade:
                     "id": linha_id,
                     "secao": "RECEITAS",
                     "rotulo": receita.descricao,
+                    "recorrencia": receita.recorrencia,
                     "celulas": celulas,
                     "total_anual": total,
                 }
             )
         return linhas
 
-    def _linhas_despesas(self, ano: int) -> list[dict]:
+    def _linhas_despesas(self, ano: int, carteira_id: int) -> list[dict]:
         despesas = self._sessao.scalars(
             select(Despesa)
-            .where(Despesa.ativo.is_(True))
+            .where(Despesa.ativo.is_(True), Despesa.carteira_id == carteira_id)
             .options(joinedload(Despesa.mensais))
         ).unique().all()
         linhas: list[dict] = []
@@ -174,6 +172,7 @@ class ServicoGrade:
                     "id": linha_id,
                     "secao": "DESPESAS",
                     "rotulo": despesa.descricao,
+                    "recorrencia": despesa.recorrencia,
                     "celulas": celulas,
                     "total_anual": total,
                 }
@@ -208,12 +207,16 @@ class ServicoGrade:
             )
         return linhas
 
-    def _totais_anuais(self, ano: int, mes_caixa: int) -> dict:
+    def _totais_anuais(self, ano: int, mes_caixa: int, carteira_id: int) -> dict:
         receitas_ano = self._sessao.scalars(
-            select(ReceitaMensal.valor).where(ReceitaMensal.ano == ano)
+            select(ReceitaMensal.valor)
+            .join(Receita)
+            .where(ReceitaMensal.ano == ano, Receita.carteira_id == carteira_id)
         ).all()
         despesas_ano = self._sessao.scalars(
-            select(DespesaMensal.valor).where(DespesaMensal.ano == ano)
+            select(DespesaMensal.valor)
+            .join(Despesa)
+            .where(DespesaMensal.ano == ano, Despesa.carteira_id == carteira_id)
         ).all()
         total_receita = somar(*(decimal_de(v) for v in receitas_ano)) if receitas_ano else ZERO
         total_despesa = somar(*(decimal_de(v) for v in despesas_ano)) if despesas_ano else ZERO
@@ -221,7 +224,7 @@ class ServicoGrade:
         return {
             "total_receita": total_receita,
             "total_despesa": total_despesa,
-            "total_orcado": decimal_de(total_despesa - total_receita),
+            "total_orcado": decimal_de(total_receita - total_despesa),
             "total_pago": comp.total_pago,
             "caixa": comp.saldo_caixa,
         }

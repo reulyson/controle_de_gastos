@@ -1,6 +1,7 @@
 export const chavesConsulta = {
   carteiras: {
     todas: ['carteiras'] as const,
+    anos: (carteiraId: string) => ['carteiras', carteiraId, 'anos'] as const,
   },
   grade: {
     controle: (carteiraId: string, ano: number, mes: number) =>

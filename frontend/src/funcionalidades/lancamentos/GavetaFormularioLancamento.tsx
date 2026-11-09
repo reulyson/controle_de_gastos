@@ -4,9 +4,14 @@ import { api } from '@/compartilhado/api/servicos';
 import { chavesConsulta } from '@/compartilhado/api/chavesConsulta';
 import type { IdRecurso, RecorrenciaLancamento, TipoLancamento } from '@/compartilhado/api/tipos';
 import { useCarteira } from '@/compartilhado/contexto/ContextoCarteira';
+import { dataReferenciaISO, formatarTitulo, mesAnoDeISO } from '@/compartilhado/formatacao';
 import { Botao } from '@/compartilhado/ui/Botao';
+import { CampoData } from '@/compartilhado/ui/CampoData';
+import { CampoMoeda } from '@/compartilhado/ui/CampoMoeda';
 import { GavetaLateral } from '@/compartilhado/ui/GavetaLateral';
-import { SeletorCategoriaTags } from '@/compartilhado/ui/SeletorCategoriaTags';
+import { SeletorCategoria } from '@/compartilhado/ui/SeletorCategoria';
+import { SeletorSegmento } from '@/compartilhado/ui/SeletorSegmento';
+import { ToggleLinha } from '@/compartilhado/ui/ToggleLinha';
 
 interface GavetaFormularioLancamentoProps {
   aberta: boolean;
@@ -14,45 +19,57 @@ interface GavetaFormularioLancamentoProps {
   onFechar: () => void;
 }
 
+const TIPOS_LANCAMENTO = [
+  { valor: 'unica' as const, rotulo: 'Transação' },
+  { valor: 'mensal' as const, rotulo: 'Recorrente' },
+];
+
 export function GavetaFormularioLancamento({
   aberta,
   tipo,
   onFechar,
 }: GavetaFormularioLancamentoProps) {
-  const { carteiraId, anoPadrao } = useCarteira();
+  const { carteiraId, anoSelecionado } = useCarteira();
   const qc = useQueryClient();
 
-  const [descricao, setDescricao] = useState('');
-  const [valor, setValor] = useState('');
   const [recorrencia, setRecorrencia] = useState<RecorrenciaLancamento>('unica');
-  const [mes, setMes] = useState(new Date().getMonth() + 1);
-  const [ano, setAno] = useState(anoPadrao);
+  const [descricao, setDescricao] = useState('');
   const [categoriaId, setCategoriaId] = useState<IdRecurso | null>(null);
-  const [tagIds, setTagIds] = useState<IdRecurso[]>([]);
+  const [valor, setValor] = useState<number | null>(null);
+  const [data, setData] = useState(() => dataReferenciaISO(anoSelecionado));
+  const [meses, setMeses] = useState('12');
+  const [valorVariavel, setValorVariavel] = useState(false);
 
   useEffect(() => {
     if (!aberta) return;
-    setDescricao('');
-    setValor('');
     setRecorrencia('unica');
-    setMes(new Date().getMonth() + 1);
-    setAno(anoPadrao);
+    setDescricao('');
     setCategoriaId(null);
-    setTagIds([]);
-  }, [aberta, anoPadrao]);
+    setValor(null);
+    setData(dataReferenciaISO(anoSelecionado));
+    setMeses('12');
+    setValorVariavel(false);
+  }, [aberta, anoSelecionado]);
 
   const salvar = useMutation({
     mutationFn: async () => {
       if (!carteiraId) throw new Error('Carteira não disponível');
+      if (valor === null || valor <= 0) throw new Error('Informe um valor válido');
+      const { mes, ano } = mesAnoDeISO(data);
       const payload = {
         carteira_id: carteiraId,
-        descricao: descricao.trim(),
-        valor: Number(valor.replace(',', '.')),
+        descricao: formatarTitulo(descricao),
+        valor,
         categoria_id: categoriaId,
-        tag_ids: tagIds,
         recorrencia,
         mes_referencia: mes,
         ano_referencia: ano,
+        ...(recorrencia === 'mensal'
+          ? {
+              quantidade_meses: Math.max(1, Number(meses) || 12),
+              valor_variavel: valorVariavel,
+            }
+          : {}),
       };
       if (tipo === 'receita') return api.receitas.criar(payload);
       return api.despesas.criar(payload);
@@ -61,6 +78,7 @@ export function GavetaFormularioLancamento({
       if (!carteiraId) return;
       await qc.invalidateQueries({ queryKey: chavesConsulta.receitas.lista(carteiraId) });
       await qc.invalidateQueries({ queryKey: chavesConsulta.despesas.lista(carteiraId) });
+      await qc.invalidateQueries({ queryKey: chavesConsulta.carteiras.anos(carteiraId) });
       await qc.invalidateQueries({
         queryKey: ['grade-controle', carteiraId],
       });
@@ -69,6 +87,8 @@ export function GavetaFormularioLancamento({
   });
 
   const titulo = tipo === 'receita' ? 'Nova receita' : 'Nova despesa';
+  const podeSalvar =
+    Boolean(descricao.trim()) && valor !== null && valor > 0 && Boolean(carteiraId) && Boolean(data);
 
   return (
     <GavetaLateral
@@ -83,7 +103,7 @@ export function GavetaFormularioLancamento({
           <Botao
             carregando={salvar.isPending}
             onClick={() => salvar.mutate()}
-            disabled={!descricao.trim() || !valor || !carteiraId}
+            disabled={!podeSalvar}
           >
             Salvar
           </Botao>
@@ -94,12 +114,19 @@ export function GavetaFormularioLancamento({
         className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
-          salvar.mutate();
+          if (podeSalvar) salvar.mutate();
         }}
       >
+        <SeletorSegmento
+          rotulo="Tipo"
+          valor={recorrencia}
+          opcoes={TIPOS_LANCAMENTO}
+          onChange={setRecorrencia}
+        />
+
         <div>
           <label className="fin-label" htmlFor="descricao">
-            Descrição
+            Descrição *
           </label>
           <input
             id="descricao"
@@ -109,76 +136,52 @@ export function GavetaFormularioLancamento({
             required
           />
         </div>
-        <div>
-          <label className="fin-label" htmlFor="valor">
-            Valor (R$)
-          </label>
-          <input
-            id="valor"
-            className="fin-input"
-            inputMode="decimal"
-            value={valor}
-            onChange={(e) => setValor(e.target.value)}
-            required
-          />
-        </div>
 
-        <SeletorCategoriaTags
+        <SeletorCategoria
           tipo={tipo}
           categoriaId={categoriaId}
           onCategoriaChange={setCategoriaId}
-          tagIds={tagIds}
-          onTagsChange={setTagIds}
         />
 
-        <div>
-          <span className="fin-label">Recorrência</span>
-          <div className="flex gap-2">
-            {(['unica', 'mensal'] as const).map((r) => (
-              <button
-                key={r}
-                type="button"
-                onClick={() => setRecorrencia(r)}
-                className={`flex-1 rounded-xl border px-3 py-2 text-sm font-semibold ${
-                  recorrencia === r
-                    ? 'border-fin-teal-500 bg-fin-teal-50 text-fin-teal-800'
-                    : 'border-slate-200 text-slate-600'
-                }`}
-              >
-                {r === 'unica' ? 'Única' : 'Mensal'}
-              </button>
-            ))}
-          </div>
-        </div>
+        <CampoMoeda
+          id="valor"
+          label="Valor (R$)"
+          valor={valor}
+          onChange={setValor}
+          obrigatorio
+        />
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="fin-label" htmlFor="mes">
-              Mês
-            </label>
-            <input
-              id="mes"
-              type="number"
-              min={1}
-              max={12}
-              className="fin-input"
-              value={mes}
-              onChange={(e) => setMes(Number(e.target.value))}
+        <CampoData
+          id="data-lancamento"
+          label="Data"
+          valor={data}
+          onChange={setData}
+          obrigatorio
+        />
+
+        {recorrencia === 'mensal' ? (
+          <>
+            <div>
+              <label className="fin-label" htmlFor="meses-lancamento">
+                Meses
+              </label>
+              <input
+                id="meses-lancamento"
+                type="number"
+                min={1}
+                className="fin-input"
+                value={meses}
+                onChange={(e) => setMeses(e.target.value)}
+              />
+            </div>
+            <ToggleLinha
+              titulo="Valor variável"
+              descricao="Mantém o valor só no mês inicial; os demais ficam zerados"
+              ativo={valorVariavel}
+              onAlternar={() => setValorVariavel((v) => !v)}
             />
-          </div>
-          <div>
-            <label className="fin-label" htmlFor="ano">
-              Ano
-            </label>
-            <input
-              id="ano"
-              type="number"
-              className="fin-input"
-              value={ano}
-              onChange={(e) => setAno(Number(e.target.value))}
-            />
-          </div>
-        </div>
+          </>
+        ) : null}
 
         {salvar.error instanceof Error ? (
           <p className="text-sm text-rose-600">{salvar.error.message}</p>

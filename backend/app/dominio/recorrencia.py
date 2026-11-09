@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from app.dominio.competencia import Competencia
-from app.dominio.dinheiro import decimal_de
+from app.dominio.dinheiro import ZERO, decimal_de
 from app.dominio.enumeracoes import TipoRecorrencia
 
 
@@ -23,19 +23,29 @@ class OcorrenciaRecorrente:
     indice: int = 1
 
 
+def _valor_ocorrencia(valor: Decimal, indice: int, valor_variavel: bool) -> Decimal:
+    """Valor da ocorrência: só o 1º mês mantém o valor se variável."""
+    if valor_variavel and indice > 1:
+        return ZERO
+    return valor
+
+
 def gerar_ocorrencias(
     tipo: TipoRecorrencia,
     valor: Decimal,
     competencia_inicio: Competencia,
     quantidade_meses: int | None = None,
+    *,
+    valor_variavel: bool = False,
 ) -> list[OcorrenciaRecorrente]:
     """Gera ocorrências únicas ou mensais.
 
     Args:
         tipo: UNICA ou MENSAL.
-        valor: Valor de cada ocorrência.
+        valor: Valor de cada ocorrência (ou do 1º mês se valor_variavel).
         competencia_inicio: Primeira competência.
         quantidade_meses: Para MENSAL, quantos meses gerar (padrão 12).
+        valor_variavel: Se True em MENSAL, só o 1º mês recebe ``valor``; demais = 0.
 
     Returns:
         list[OcorrenciaRecorrente]: Lista de ocorrências geradas.
@@ -54,6 +64,12 @@ def gerar_ocorrencias(
     ocorrencias: list[OcorrenciaRecorrente] = []
     comp = competencia_inicio
     for indice in range(1, meses + 1):
-        ocorrencias.append(OcorrenciaRecorrente(competencia=comp, valor=valor_q, indice=indice))
+        ocorrencias.append(
+            OcorrenciaRecorrente(
+                competencia=comp,
+                valor=_valor_ocorrencia(valor_q, indice, valor_variavel),
+                indice=indice,
+            )
+        )
         comp = comp.proxima()
     return ocorrencias

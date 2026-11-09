@@ -1,12 +1,15 @@
 """Cálculos agregados de receitas, despesas e caixa."""
 
+from calendar import monthrange
+from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.dominio.cheque import cheque_livre
 from app.dominio.dinheiro import ZERO, decimal_de, somar
+from app.dominio.enumeracoes import StatusFechamento
 from app.dominio.resumo import TotaisCompetencia, consolidar_totais
 from app.modulos.modelos import (
     Carteira,
@@ -14,6 +17,7 @@ from app.modulos.modelos import (
     ContaFinanceira,
     Despesa,
     DespesaMensal,
+    FechamentoMensal,
     Pagamento,
     Receita,
     ReceitaMensal,
@@ -21,51 +25,41 @@ from app.modulos.modelos import (
 
 
 class ServicoCalculos:
-    """Consolida totais e indicadores por competência."""
+    """Consolida totais e indicadores por competência e carteira."""
 
-    def __init__(self, sessao: Session) -> None:
+    def __init__(self, sessao: Session, carteira_id: int | None = None) -> None:
         self._sessao = sessao
+        self._carteira_id = carteira_id
 
-    def obter_conta_unica(self) -> ContaFinanceira:
-        """Retorna a conta de caixa (bootstrap garante uma).
+    def definir_carteira(self, carteira_id: int) -> None:
+        self._carteira_id = carteira_id
 
-        Returns:
-            ContaFinanceira: Conta principal.
-
-        Raises:
-            RuntimeError: Se não houver conta.
-        """
-        conta = self._sessao.scalar(select(ContaFinanceira).limit(1))
-        if conta is None:
-            msg = "Conta financeira não encontrada"
-            raise RuntimeError(msg)
-        return conta
-
-    def obter_carteira(self) -> Carteira:
-        """Retorna carteira principal.
-
-        Returns:
-            Carteira: Primeira carteira cadastrada.
-        """
-        carteira = self._sessao.scalar(select(Carteira).limit(1))
+    def obter_carteira(self, carteira_id: int | None = None) -> Carteira:
+        cid = carteira_id if carteira_id is not None else self._carteira_id
+        if cid is None:
+            raise RuntimeError("carteira_id não informado")
+        carteira = self._sessao.get(Carteira, cid)
         if carteira is None:
-            msg = "Carteira não encontrada"
-            raise RuntimeError(msg)
+            raise RuntimeError("Carteira não encontrada")
         return carteira
 
+    def obter_conta(self, carteira_id: int | None = None) -> ContaFinanceira:
+        cid = carteira_id if carteira_id is not None else self._carteira_id
+        if cid is None:
+            raise RuntimeError("carteira_id não informado")
+        conta = self._sessao.scalar(
+            select(ContaFinanceira).where(ContaFinanceira.carteira_id == cid)
+        )
+        if conta is None:
+            raise RuntimeError("Conta financeira não encontrada")
+        return conta
+
+    def obter_conta_unica(self) -> ContaFinanceira:
+        """Compat: usa carteira definida no serviço."""
+        return self.obter_conta()
+
     def saldo_inicial_competencia(self, ano: int, mes: int) -> Decimal:
-        """Saldo inicial do mês (fechamento anterior ou saldo_inicial da conta).
-
-        Args:
-            ano: Ano de referência.
-            mes: Mês de referência.
-
-        Returns:
-            Decimal: Saldo de abertura.
-        """
-        from app.modulos.modelos import FechamentoMensal
-
-        conta = self.obter_conta_unica()
+        conta = self.obter_conta()
         if mes == 1:
             comp_anterior = (ano - 1, 12)
         else:
@@ -82,71 +76,104 @@ class ServicoCalculos:
             return decimal_de(fechamento.saldo_final)
         return decimal_de(conta.saldo_inicial)
 
+    @staticmethod
+    def _intervalo_mes(ano: int, mes: int) -> tuple[date, date]:
+        ultimo = monthrange(ano, mes)[1]
+        return date(ano, mes, 1), date(ano, mes, ultimo)
+
+    def pendencias_meses_fechados(self, ano: int, mes: int) -> Decimal:
+        """Despesas não pagas de competências fechadas anteriores à visão."""
+        cid = self._carteira_id
+        if cid is None:
+            raise RuntimeError("carteira_id não informado")
+        conta = self.obter_conta()
+        valores = self._sessao.scalars(
+            select(DespesaMensal.valor)
+            .join(Despesa, DespesaMensal.despesa_id == Despesa.id)
+            .join(
+                FechamentoMensal,
+                and_(
+                    FechamentoMensal.ano == DespesaMensal.ano,
+                    FechamentoMensal.mes == DespesaMensal.mes,
+                    FechamentoMensal.conta_id == conta.id,
+                ),
+            )
+            .where(
+                Despesa.carteira_id == cid,
+                DespesaMensal.pago.is_(False),
+                FechamentoMensal.status == StatusFechamento.FECHADO,
+                or_(
+                    DespesaMensal.ano < ano,
+                    and_(DespesaMensal.ano == ano, DespesaMensal.mes < mes),
+                ),
+            )
+        ).all()
+        return somar(*(decimal_de(v) for v in valores)) if valores else ZERO
+
     def totais_competencia(self, ano: int, mes: int) -> TotaisCompetencia:
-        """Calcula totais de receita, despesa, pago e caixa.
-
-        Args:
-            ano: Ano.
-            mes: Mês.
-
-        Returns:
-            TotaisCompetencia: Agregados do período.
-        """
         saldo_inicial = self.saldo_inicial_competencia(ano, mes)
+        cid = self._carteira_id
+        if cid is None:
+            raise RuntimeError("carteira_id não informado")
 
         receitas = self._sessao.scalars(
-            select(ReceitaMensal.valor).where(ReceitaMensal.ano == ano, ReceitaMensal.mes == mes)
+            select(ReceitaMensal.valor)
+            .join(Receita)
+            .where(
+                ReceitaMensal.ano == ano,
+                ReceitaMensal.mes == mes,
+                Receita.carteira_id == cid,
+            )
         ).all()
         despesas = self._sessao.scalars(
-            select(DespesaMensal.valor).where(DespesaMensal.ano == ano, DespesaMensal.mes == mes)
+            select(DespesaMensal.valor)
+            .join(Despesa)
+            .where(
+                DespesaMensal.ano == ano,
+                DespesaMensal.mes == mes,
+                Despesa.carteira_id == cid,
+            )
         ).all()
 
-        conta = self.obter_conta_unica()
+        conta = self.obter_conta()
+        inicio, fim = self._intervalo_mes(ano, mes)
         pagamentos = self._sessao.scalars(
             select(Pagamento.valor_total).where(
                 Pagamento.conta_id == conta.id,
-                Pagamento.data_pagamento >= f"{ano:04d}-{mes:02d}-01",
+                Pagamento.data_pagamento >= inicio,
+                Pagamento.data_pagamento <= fim,
             )
         ).all()
 
         receitas_recebidas = self._sessao.scalars(
-            select(ReceitaMensal.valor).where(
+            select(ReceitaMensal.valor)
+            .join(Receita)
+            .where(
                 ReceitaMensal.ano == ano,
                 ReceitaMensal.mes == mes,
                 ReceitaMensal.recebido.is_(True),
-            )
-        ).all()
-        despesas_pagas = self._sessao.scalars(
-            select(DespesaMensal.valor).where(
-                DespesaMensal.ano == ano,
-                DespesaMensal.mes == mes,
-                DespesaMensal.pago.is_(True),
+                Receita.carteira_id == cid,
             )
         ).all()
 
+        total_pagamentos = (
+            somar(*(decimal_de(v) for v in pagamentos)) if pagamentos else ZERO
+        )
         totais = consolidar_totais(
             [decimal_de(v) for v in receitas],
             [decimal_de(v) for v in despesas],
             [decimal_de(v) for v in pagamentos],
             saldo_inicial,
         )
+        # Caixa: créditos do mês (recebidos) − pagamentos com data no mês (inclui pendências).
         totais.saldo_caixa = totais.calcular_saldo_caixa(
             saldo_inicial,
             sum((decimal_de(v) for v in receitas_recebidas), ZERO),
-            sum((decimal_de(v) for v in despesas_pagas), ZERO),
+            total_pagamentos,
         )
         return totais
 
     def indicadores(self, ano: int, mes: int) -> dict[str, Decimal]:
-        """Indicadores auxiliares para grade de controle (legado).
-
-        Args:
-            ano: Ano.
-            mes: Mês.
-
-        Returns:
-            dict: cheque_livre, saldo_caixa, total_orcado, etc.
-        """
         totais = self.totais_competencia(ano, mes)
         carteira = self.obter_carteira()
         return {
@@ -159,53 +186,19 @@ class ServicoCalculos:
         }
 
     def indicadores_mes(self, ano: int, mes: int) -> dict[str, Decimal]:
-        """Indicadores no formato esperado pelo frontend.
-
-        Args:
-            ano: Ano.
-            mes: Mês.
-
-        Returns:
-            dict: saldo_caixa, cheque_livre, receitas, despesas, orcado, pendencias.
-        """
         totais = self.totais_competencia(ano, mes)
         carteira = self.obter_carteira()
-        pend_rec = self._sessao.scalars(
-            select(ReceitaMensal.valor).where(
-                ReceitaMensal.ano == ano,
-                ReceitaMensal.mes == mes,
-                ReceitaMensal.recebido.is_(False),
-            )
-        ).all()
-        pend_desp = self._sessao.scalars(
-            select(DespesaMensal.valor).where(
-                DespesaMensal.ano == ano,
-                DespesaMensal.mes == mes,
-                DespesaMensal.pago.is_(False),
-            )
-        ).all()
-        pendencias = somar(
-            *(decimal_de(v) for v in pend_rec),
-            *(decimal_de(v) for v in pend_desp),
-        )
         return {
             "saldo_caixa": totais.saldo_caixa,
             "cheque_livre": cheque_livre(carteira.limite_cheque_especial_total, totais.saldo_caixa),
             "receitas": totais.total_receita,
             "despesas": totais.total_despesa,
             "orcado": totais.total_orcado,
-            "pendencias": pendencias,
+            "total_pago": totais.total_pago,
+            "pendencias": self.pendencias_meses_fechados(ano, mes),
         }
 
     def relatorio_anual(self, ano: int) -> dict:
-        """Resumo mensal e por categoria para relatório.
-
-        Args:
-            ano: Ano de referência.
-
-        Returns:
-            dict: meses e por_categoria.
-        """
         meses: list[dict] = []
         for mes in range(1, 13):
             t = self.totais_competencia(ano, mes)
@@ -220,8 +213,11 @@ class ServicoCalculos:
         por_categoria: list[dict] = []
         categorias = {c.id: c for c in self._sessao.scalars(select(Categoria)).all()}
         agregado: dict[tuple[str, str], Decimal] = {}
+        cid = self._carteira_id
         for rm in self._sessao.scalars(
-            select(ReceitaMensal).where(ReceitaMensal.ano == ano)
+            select(ReceitaMensal)
+            .join(Receita)
+            .where(ReceitaMensal.ano == ano, Receita.carteira_id == cid)
         ).all():
             rec = self._sessao.get(Receita, rm.receita_id)
             cat_id = rec.categoria_id if rec else None
@@ -229,7 +225,9 @@ class ServicoCalculos:
             chave = (nome, "receita")
             agregado[chave] = agregado.get(chave, ZERO) + decimal_de(rm.valor)
         for dm in self._sessao.scalars(
-            select(DespesaMensal).where(DespesaMensal.ano == ano)
+            select(DespesaMensal)
+            .join(Despesa)
+            .where(DespesaMensal.ano == ano, Despesa.carteira_id == cid)
         ).all():
             desp = self._sessao.get(Despesa, dm.despesa_id)
             cat_id = desp.categoria_id if desp else None

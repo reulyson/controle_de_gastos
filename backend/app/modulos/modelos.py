@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.dominio.enumeracoes import (
     StatusFechamento,
     TipoCategoria,
+    TipoCarteira,
     TipoCompraCartao,
     TipoRecorrencia,
 )
@@ -30,14 +31,33 @@ MONETARIO = Numeric(14, 2)
 
 
 class Usuario(Base):
-    """Usuário do sistema (stub para autenticação futura)."""
+    """Usuário autenticável do sistema."""
 
     __tablename__ = "usuarios"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     nome: Mapped[str] = mapped_column(String(255), nullable=False)
+    senha_hash: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     criado_em: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    carteiras: Mapped[list["Carteira"]] = relationship(back_populates="usuario")
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(back_populates="usuario")
+
+
+class RefreshToken(Base):
+    """Refresh token opaco (armazenado como hash)."""
+
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    expira_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    revogado: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    usuario: Mapped["Usuario"] = relationship(back_populates="refresh_tokens")
 
 
 class Carteira(Base):
@@ -46,13 +66,19 @@ class Carteira(Base):
     __tablename__ = "carteiras"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), nullable=False, index=True)
     nome: Mapped[str] = mapped_column(String(120), nullable=False)
+    tipo_carteira: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=TipoCarteira.PESSOAL.value
+    )
     limite_cheque_especial_total: Mapped[Decimal] = mapped_column(
         MONETARIO, nullable=False, default=Decimal("0.00")
     )
     ano_padrao: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    padrao: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     criado_em: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
+    usuario: Mapped["Usuario"] = relationship(back_populates="carteiras")
     conta: Mapped[Optional["ContaFinanceira"]] = relationship(back_populates="carteira", uselist=False)
     cartoes: Mapped[list["Cartao"]] = relationship(back_populates="carteira")
 
@@ -73,15 +99,26 @@ class ContaFinanceira(Base):
 
 
 class Categoria(Base):
-    """Categoria unificada de receita, despesa ou compra."""
+    """Categoria unificada: sistema (usuario_id NULL) ou pessoal do usuário."""
 
     __tablename__ = "categorias"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     nome: Mapped[str] = mapped_column(String(120), nullable=False)
-    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    tipo: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=TipoCategoria.AMBOS.value
+    )
+    usuario_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("usuarios.id"), nullable=True, index=True
+    )
 
-    __table_args__ = (UniqueConstraint("nome", "tipo", name="uq_categoria_nome_tipo"),)
+    __table_args__ = (
+        UniqueConstraint("nome", "usuario_id", name="uq_categoria_nome_usuario"),
+    )
+
+    @property
+    def origem(self) -> str:
+        return "padrao" if self.usuario_id is None else "pessoal"
 
 
 class Receita(Base):
@@ -90,10 +127,12 @@ class Receita(Base):
     __tablename__ = "receitas"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    carteira_id: Mapped[int] = mapped_column(ForeignKey("carteiras.id"), nullable=False, index=True)
     categoria_id: Mapped[Optional[int]] = mapped_column(ForeignKey("categorias.id"))
     descricao: Mapped[str] = mapped_column(String(255), nullable=False)
     valor: Mapped[Decimal] = mapped_column(MONETARIO, nullable=False)
     recorrencia: Mapped[str] = mapped_column(String(20), nullable=False, default=TipoRecorrencia.UNICA)
+    valor_variavel: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     criado_em: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -123,10 +162,12 @@ class Despesa(Base):
     __tablename__ = "despesas"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    carteira_id: Mapped[int] = mapped_column(ForeignKey("carteiras.id"), nullable=False, index=True)
     categoria_id: Mapped[Optional[int]] = mapped_column(ForeignKey("categorias.id"))
     descricao: Mapped[str] = mapped_column(String(255), nullable=False)
     valor: Mapped[Decimal] = mapped_column(MONETARIO, nullable=False)
     recorrencia: Mapped[str] = mapped_column(String(20), nullable=False, default=TipoRecorrencia.UNICA)
+    valor_variavel: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     criado_em: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -189,6 +230,9 @@ class Cartao(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     carteira_id: Mapped[int] = mapped_column(ForeignKey("carteiras.id"), nullable=False)
     nome: Mapped[str] = mapped_column(String(120), nullable=False)
+    bandeira: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    final_4: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
+    limite: Mapped[Decimal] = mapped_column(MONETARIO, nullable=False, default=Decimal("0.00"))
     dia_fechamento: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     dia_vencimento: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -313,19 +357,7 @@ class FechamentoPendencia(Base):
 
 
 def garantir_bootstrap(sessao) -> None:
-    """Cria carteira e conta padrão se o banco estiver vazio.
+    """Garante dados iniciais do sistema (categorias padrão)."""
+    from app.nucleo.seed_categorias import garantir_categorias_padrao
 
-    Args:
-        sessao: Sessão SQLAlchemy ativa.
-    """
-    from sqlalchemy import select
-
-    existe = sessao.scalar(select(Carteira.id).limit(1))
-    if existe is not None:
-        return
-    carteira = Carteira(nome="Principal", limite_cheque_especial_total=Decimal("0.00"))
-    sessao.add(carteira)
-    sessao.flush()
-    conta = ContaFinanceira(carteira_id=carteira.id, nome="Caixa", saldo_inicial=Decimal("0.00"))
-    sessao.add(conta)
-    sessao.commit()
+    garantir_categorias_padrao(sessao)

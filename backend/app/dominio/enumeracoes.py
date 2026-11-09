@@ -4,11 +4,20 @@ from enum import StrEnum
 
 
 class TipoCategoria(StrEnum):
-    """Classificação de uma categoria financeira."""
+    """Classificação de uma categoria financeira (legado; UX não expõe)."""
 
     RECEITA = "receita"
     DESPESA = "despesa"
     COMPRA = "compra"
+    AMBOS = "ambos"
+
+
+class TipoCarteira(StrEnum):
+    """Natureza da carteira."""
+
+    PESSOAL = "pessoal"
+    EMPRESARIAL = "empresarial"
+    CONJUNTO = "conjunto"
 
 
 class TipoRecorrencia(StrEnum):

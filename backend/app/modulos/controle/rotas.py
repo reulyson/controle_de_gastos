@@ -1,4 +1,4 @@
-"""Endpoint grade-controle."""
+"""Endpoint grade-controle legado."""
 
 from decimal import Decimal
 
@@ -7,16 +7,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.modulos.modelos import DespesaMensal, ReceitaMensal
+from app.modulos.modelos import Despesa, DespesaMensal, Receita, ReceitaMensal, Usuario
 from app.nucleo.banco import obter_sessao
+from app.nucleo.deps_auth import obter_carteira_do_usuario, obter_usuario_atual
 from app.nucleo_financeiro.servico_calculos import ServicoCalculos
 
 roteador = APIRouter(prefix="/controle", tags=["Controle"])
 
 
 class LinhaReceita(BaseModel):
-    """Linha de receita na grade."""
-
     id: int
     receita_id: int
     valor: Decimal
@@ -24,8 +23,6 @@ class LinhaReceita(BaseModel):
 
 
 class LinhaDespesa(BaseModel):
-    """Linha de despesa na grade."""
-
     id: int
     despesa_id: int
     valor: Decimal
@@ -33,8 +30,6 @@ class LinhaDespesa(BaseModel):
 
 
 class IndicadoresGrade(BaseModel):
-    """Totais e indicadores do mês."""
-
     total_receita: Decimal
     total_despesa: Decimal
     total_orcado: Decimal
@@ -44,8 +39,6 @@ class IndicadoresGrade(BaseModel):
 
 
 class GradeControleResposta(BaseModel):
-    """Resposta completa da grade."""
-
     ano: int
     mes: int
     receitas: list[LinhaReceita] = Field(default_factory=list)
@@ -55,19 +48,33 @@ class GradeControleResposta(BaseModel):
 
 @roteador.get("/grade-controle", response_model=GradeControleResposta)
 def grade_controle(
+    carteira_id: int = Query(...),
     ano: int = Query(..., ge=2000),
     mes: int = Query(..., ge=1, le=12),
     sessao: Session = Depends(obter_sessao),
+    usuario: Usuario = Depends(obter_usuario_atual),
 ) -> GradeControleResposta:
-    """Retorna grade do mês com listas e indicadores."""
+    obter_carteira_do_usuario(carteira_id, usuario, sessao)
     receitas = sessao.scalars(
-        select(ReceitaMensal).where(ReceitaMensal.ano == ano, ReceitaMensal.mes == mes)
+        select(ReceitaMensal)
+        .join(Receita)
+        .where(
+            ReceitaMensal.ano == ano,
+            ReceitaMensal.mes == mes,
+            Receita.carteira_id == carteira_id,
+        )
     ).all()
     despesas = sessao.scalars(
-        select(DespesaMensal).where(DespesaMensal.ano == ano, DespesaMensal.mes == mes)
+        select(DespesaMensal)
+        .join(Despesa)
+        .where(
+            DespesaMensal.ano == ano,
+            DespesaMensal.mes == mes,
+            Despesa.carteira_id == carteira_id,
+        )
     ).all()
 
-    calc = ServicoCalculos(sessao)
+    calc = ServicoCalculos(sessao, carteira_id)
     ind_raw = calc.indicadores(ano, mes)
 
     return GradeControleResposta(

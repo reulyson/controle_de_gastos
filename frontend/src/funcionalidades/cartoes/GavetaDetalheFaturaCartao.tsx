@@ -3,7 +3,13 @@ import { api } from '@/compartilhado/api/servicos';
 import { chavesConsulta } from '@/compartilhado/api/chavesConsulta';
 import { useCarteira } from '@/compartilhado/contexto/ContextoCarteira';
 import type { IdRecurso } from '@/compartilhado/api/tipos';
-import { cn, formatarMesCompleto, formatarMoeda, idComoTexto } from '@/compartilhado/formatacao';
+import {
+  cn,
+  formatarMesCompleto,
+  formatarMoeda,
+  formatarTitulo,
+  idComoTexto,
+} from '@/compartilhado/formatacao';
 import { EstadoConsulta } from '@/compartilhado/ui/EstadoConsulta';
 import { GavetaLateral } from '@/compartilhado/ui/GavetaLateral';
 
@@ -96,7 +102,9 @@ export function GavetaDetalheFaturaCartao({
                     <span className="material-symbols-outlined text-sm">check</span>
                   </button>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium text-slate-800">{item.descricao}</p>
+                    <p className="truncate font-medium text-slate-800">
+                      {formatarTitulo(item.descricao)}
+                    </p>
                     {item.recorrente ? (
                       <p className="text-xs text-slate-500">Recorrente</p>
                     ) : null}

@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from app.modulos.auth.rotas import roteador as roteador_auth
 from app.modulos.cartoes.rotas import roteador as roteador_cartoes
 from app.modulos.carteiras.rotas import roteador as roteador_carteiras
 from app.modulos.categorias.rotas import roteador as roteador_categorias
@@ -18,6 +19,7 @@ from app.modulos.tags.rotas import roteador as roteador_tags
 
 roteador_v1 = APIRouter(prefix="/api/v1")
 
+roteador_v1.include_router(roteador_auth)
 roteador_v1.include_router(roteador_carteiras)
 roteador_v1.include_router(roteador_categorias)
 roteador_v1.include_router(roteador_tags)

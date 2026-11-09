@@ -9,16 +9,23 @@ from app.dominio.dinheiro import decimal_de
 from app.dominio.liquidacao import SaldoInsuficienteError, validar_pagamento_com_cheque
 from app.dominio.enumeracoes import TipoCompraCartao
 from app.dominio.regras_cartao import regra_item_fatura
-from app.modulos.modelos import DespesaMensal, FaturaItem, Pagamento, PagamentoRateio, ReceitaMensal
+from app.modulos.modelos import (
+    Despesa,
+    DespesaMensal,
+    FaturaItem,
+    Pagamento,
+    PagamentoRateio,
+    ReceitaMensal,
+)
 from app.nucleo_financeiro.servico_calculos import ServicoCalculos
 
 
 class ServicoPagamentos:
     """Marca despesas como pagas e registra pagamentos."""
 
-    def __init__(self, sessao: Session) -> None:
+    def __init__(self, sessao: Session, carteira_id: int | None = None) -> None:
         self._sessao = sessao
-        self._calculos = ServicoCalculos(sessao)
+        self._calculos = ServicoCalculos(sessao, carteira_id)
 
     def saldo_atual(self) -> Decimal:
         """Estima saldo de caixa com base nos totais do mês corrente.
@@ -107,6 +114,10 @@ class ServicoPagamentos:
         if despesa_mensal is None:
             msg = "Despesa mensal não encontrada"
             raise ValueError(msg)
+        despesa = self._sessao.get(Despesa, despesa_mensal.despesa_id)
+        if despesa is None:
+            raise ValueError("Despesa não encontrada")
+        self._calculos = ServicoCalculos(self._sessao, despesa.carteira_id)
         dia = data_pagamento or date.today()
         return self.registrar_pagamento(
             descricao=f"Pagamento despesa #{despesa_mensal_id}",
